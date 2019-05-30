@@ -196,7 +196,7 @@ class CBController extends Controller
 
     private function checkHideForm()
     {
-        if (count($this->hide_form)) {
+        if ($this->hide_form && count($this->hide_form)) {
             foreach ($this->form as $i => $f) {
                 if (in_array($f['name'], $this->hide_form)) {
                     unset($this->form[$i]);
@@ -271,7 +271,7 @@ class CBController extends Controller
             $join_table_temp[] = $table;
 
             if (! $field) {
-                die('Please make sure there is key `name` in each row of col');
+                continue;
             }
 
             if (strpos($field, ' as ') !== false) {
@@ -303,38 +303,100 @@ class CBController extends Controller
 
             if ($join) {
 
-                $join_exp = explode(',', $join);
-
-                $join_table = $join_exp[0];
-                $joinTablePK = CB::pk($join_table);
-                $join_column = $join_exp[1];
-                $join_alias = str_replace(".", "_", $join_table);
-
+                // @atlasan comment: initialize values
+                $ob_join = false;
+                $join_exp = false;
+                $join_table = false;
+                $join_column = false;
+                $join_table1 = false;
+                $join_column1 = false;
+                
+                // @atlasan comment: dirty check (beacuse is faster)
+                if (substr($join, 0, 1) == "{"){
+                    // @atlasan comment: use a json to specify complex behaviours
+                    $join = str_replace("'", '"', $join); // @atlasan comment: fixing php behaviour: expecting json as using double quotes
+                    $ob_join = json_decode($join);
+                    if (!empty($ob_join->table)) $join_table = $ob_join->table;
+                    /*die(    print_r($join,true)
+                            ." ::" .print_r($ob_join,true)
+                            ." ::" .print_r(
+                               json_decode('{"table": "mytb"}')
+                               ,true)
+                        );*/
+                }else{
+                    $join_exp = explode(',', $join);
+                    $join_table = $join_exp[0];
+                }
+                
+                // @atlasan comment: alias calculation
+                $join_alias = str_replace(".", "_", $join_table); // @atlasan comment: ¿Why should a table name contains a dot? Db.Table ? Table.What ? And what makes it working with underscore ?
                 if (in_array($join_table, $join_table_temp)) {
                     $join_alias_count += 1;
                     $join_alias = $join_table.$join_alias_count;
                 }
                 $join_table_temp[] = $join_table;
+                $joinTablePK = CB::pk($join_table);
+                
+                // @atlasan comment: verify json object
+                if ($ob_join){
+                    // @atlasan comment: use a json to specify complex behaviours
+                    // @atlasan comment: did before alias calculation :: if (!empty($ob_join->table)) $join_table = $ob_join->table;
+                    if (!empty($ob_join->col)) $join_column = $ob_join->col;
+                    if (empty($ob_join->pat_fields)) $ob_join->pat_fields = []; // @atlasan comment: allow empty pattern? useful for static strings 
+                    if (!empty($ob_join->pat)){ // @atlasan comment: allow empty pattern? : && !empty($ob_join->pat_fields) && count($ob_join->pat_fields)){
+                        // @atlasan comment: replace fields names with the contact string pattern
+                        foreach ($ob_join->pat_fields as &$pf){
+                            $pf = "'," . $join_alias.'.'.str_replace("'", "", $pf) . ",'"; // @atlasan comment: dirty replacing eventual ' in fields names, anyway ther's no reason to have some
+                        }
+                        $join_column_pattern = vsprintf($ob_join->pat,$ob_join->pat_fields);
+                        // @atlasan comment: round the string with sql contact string command
+                        $join_column_pattern = "CONCAT('" . $join_column_pattern ."')";
+                    }
+                    // @atlasan comment: could expand on more tables using an array on $ob_join->table is is an array, for now using as normal
+                    if (!empty($ob_join->table2)) $join_table1 = $ob_join->table2;
+                    if (!empty($ob_join->col2)) $join_column1 = $ob_join->col2;
+                }
+                
+                if ($join_exp!==false){
+                    // @atlasan comment: normal behaviour
+                    
+                    // @atlasan comment: did before alias calculation :: $join_table = $join_exp[0];
+                    
+                    $join_column = $join_exp[1];
+                    // @atlasan comment: set pattern as normal field name
+                    $join_column_pattern = $join_alias.'.'.$join_column;
+                    
+                    /* @atlasan edit :: moving togheter exploded value */
+                    @$join_table1 = $join_exp[2];
+                    @$join_column1 = $join_exp[3];
+                }
+                
+                // @atlasan comment: moved alias calculation on top
 
                 $result->leftjoin($join_table.' as '.$join_alias, $join_alias.(($join_id) ? '.'.$join_id : '.'.$joinTablePK), '=', DB::raw($table.'.'.$field.(($join_where) ? ' AND '.$join_where.' ' : '')));
-                $result->addselect($join_alias.'.'.$join_column.' as '.$join_alias.'_'.$join_column);
+                
+                /* @atlasan edit :: commenting old code and add multi column teamplate select */
+                //$result->addselect($join_alias.'.'.$join_column.' as '.$join_alias.'_'.$join_column);
+                // ADDSELECT DOES NOT WORKS WITH RAW :: $result->addselect($join_column_pattern.' as '.$join_alias.'_'.$join_column);
+                $result->selectSub($join_column_pattern,$join_alias.'_'.$join_column);
 
-                $join_table_columns = CRUDBooster::getTableColumns($join_table);
+                // @atlasan comment: ¿Why is adding all the related table fields to the select? 
+                /*$join_table_columns = CRUDBooster::getTableColumns($join_table);
                 if ($join_table_columns) {
                     foreach ($join_table_columns as $jtc) {
                         $result->addselect($join_alias.'.'.$jtc.' as '.$join_alias.'_'.$jtc);
                     }
-                }
-
+                }*/
+                
                 $alias[] = $join_alias;
                 $columns_table[$index]['type_data'] = CRUDBooster::getFieldType($join_table, $join_column);
                 $columns_table[$index]['field'] = $join_alias.'_'.$join_column;
                 $columns_table[$index]['field_with'] = $join_alias.'.'.$join_column;
                 $columns_table[$index]['field_raw'] = $join_column;
 
-                @$join_table1 = $join_exp[2];
+                // @atlasan edit :: moved up : @$join_table1 = $join_exp[2];
                 @$joinTable1PK = CB::pk($join_table1);
-                @$join_column1 = $join_exp[3];
+                // @atlasan edit :: moved up : @$join_column1 = $join_exp[3];
                 @$join_alias1 = $join_table1;
 
                 if ($join_table1 && $join_column1) {
@@ -356,10 +418,18 @@ class CBController extends Controller
                 }
             } else {
 
-                $result->addselect($table.'.'.$field);
-                $columns_table[$index]['type_data'] = CRUDBooster::getFieldType($table, $field);
-                $columns_table[$index]['field'] = $field;
-                $columns_table[$index]['field_raw'] = $field;
+                if(isset($field_array[1])) {                    
+                    $result->addselect($table.'.'.$field.' as '.$table.'_'.$field);
+                    $columns_table[$index]['type_data'] = CRUDBooster::getFieldType($table, $field);
+                    $columns_table[$index]['field'] = $table.'_'.$field;
+                    $columns_table[$index]['field_raw'] = $table.'.'.$field;
+                }else{
+                    $result->addselect($table.'.'.$field);
+                    $columns_table[$index]['type_data'] = CRUDBooster::getFieldType($table, $field);
+                    $columns_table[$index]['field'] = $field;
+                    $columns_table[$index]['field_raw'] = $field;
+                }
+                
                 $columns_table[$index]['field_with'] = $table.'.'.$field;
             }
         }
@@ -504,13 +574,16 @@ class CBController extends Controller
                 $addaction[] = [
                     'label' => $s['label'],
                     'icon' => $s['button_icon'],
-                    'url' => CRUDBooster::adminPath($s['path']).'?parent_table='.$table_parent.'&parent_columns='.$s['parent_columns'].'&parent_columns_alias='.$s['parent_columns_alias'].'&parent_id=['.(! isset($s['custom_parent_id']) ? "id" : $s['custom_parent_id']).']&return_url='.urlencode(Request::fullUrl()).'&foreign_key='.$s['foreign_key'].'&label='.urlencode($s['label']),
+                    'url' => CRUDBooster::adminPath($s['path']).'?return_url='.urlencode(Request::fullUrl()).'&parent_table='.$table_parent.'&parent_columns='.$s['parent_columns'].'&parent_columns_alias='.$s['parent_columns_alias'].'&parent_id=['.(! isset($s['custom_parent_id']) ? "id" : $s['custom_parent_id']).']&foreign_key='.$s['foreign_key'].'&label='.urlencode($s['label']),
                     'color' => $s['button_color'],
                     'showIf' => $s['showIf'],
                 ];
             }
         }
 
+        /* @atlasan edit */
+        $this->hook_data_result($data['result'], $result);
+        
         $mainpath = CRUDBooster::mainpath();
         $orig_mainpath = $this->data['mainpath'];
         $title_field = $this->title_field;
@@ -587,7 +660,7 @@ class CBController extends Controller
                                 $prevalue[] = $d['label'];
                             }
                         }
-                        if (count($prevalue)) {
+                        if ($prevalue && count($prevalue)) {
                             $value = implode(", ", $prevalue);
                         }
                     }
@@ -912,7 +985,7 @@ class CBController extends Controller
             if (@$di['validation']) {
 
                 $exp = explode('|', $di['validation']);
-                if (count($exp)) {
+                if ($exp && count($exp)) {
                     foreach ($exp as &$validationItem) {
                         if (substr($validationItem, 0, 6) == 'unique') {
                             $parseUnique = explode(',', str_replace('unique:', '', $validationItem));
@@ -999,7 +1072,7 @@ class CBController extends Controller
                 continue;
             }
 
-            if (count($hide_form)) {
+            if ($hide_form && count($hide_form)) {
                 if (in_array($name, $hide_form)) {
                     continue;
                 }
@@ -1063,8 +1136,8 @@ class CBController extends Controller
             if ($ro['type'] == 'multitext') {
                 $name = $ro['name'];
                 $multitext = "";
-
-                for ($i = 0; $i <= count($this->arr[$name]) - 1; $i++) {
+                $maxI = ($this->arr[$name])?count($this->arr[$name]):0;
+                for ($i = 0; $i <= $maxI - 1; $i++) {
                     $multitext .= $this->arr[$name][$i]."|";
                 }
                 $multitext = substr($multitext, 0, strlen($multitext) - 1);
@@ -1090,7 +1163,7 @@ class CBController extends Controller
 
             if (@$ro['type'] == 'upload') {
 
-                $this->arr[$name] = CRUDBooster::uploadFile($name, $ro['encrypt'], $ro['resize_width'], $ro['resize_height'], CB::myId());
+                $this->arr[$name] = CRUDBooster::uploadFile($name, $ro['encrypt'] || $ro['upload_encrypt'], $ro['resize_width'], $ro['resize_height'], CB::myId());
 
                 if (! $this->arr[$name]) {
                     $this->arr[$name] = Request::get('_'.$name);
@@ -1140,9 +1213,13 @@ class CBController extends Controller
 
         $this->hook_before_add($this->arr);
 
-        $this->arr[$this->primary_key] = $id = CRUDBooster::newId($this->table);
-        DB::table($this->table)->insert($this->arr);
+//         $this->arr[$this->primary_key] = $id = CRUDBooster::newId($this->table); //error on sql server
+        $lastInsertId = $id = DB::table($this->table)->insertGetId($this->arr);
 
+        //fix bug if primary key is uuid
+        if($this->arr[$this->primary_key]!=$id)
+            $id = $this->arr[$this->primary_key];
+        
         //Looping Data Input Again After Insert
         foreach ($this->data_inputan as $ro) {
             $name = $ro['name'];
@@ -1164,7 +1241,7 @@ class CBController extends Controller
                         $relationship_table_pk = CB::pk($ro['relationship_table']);
                         foreach ($inputdata as $input_id) {
                             DB::table($ro['relationship_table'])->insert([
-                                $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
+//                                 $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
                                 $foreignKey => $id,
                                 $foreignKey2 => $input_id,
                             ]);
@@ -1184,7 +1261,7 @@ class CBController extends Controller
                         foreach ($inputdata as $input_id) {
                             $relationship_table_pk = CB::pk($row['relationship_table']);
                             DB::table($ro['relationship_table'])->insert([
-                                $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
+//                                 $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
                                 $foreignKey => $id,
                                 $foreignKey2 => $input_id,
                             ]);
@@ -1196,18 +1273,22 @@ class CBController extends Controller
             if ($ro['type'] == 'child') {
                 $name = str_slug($ro['label'], '');
                 $columns = $ro['columns'];
-                $count_input_data = count(Request::get($name.'-'.$columns[0]['name'])) - 1;
+                $getColName = Request::get($name.'-'.$columns[0]['name']);
+                $count_input_data = ($getColName)?(count($getColName) - 1):0;
                 $child_array = [];
+                $fk = $ro['foreign_key'];
 
                 for ($i = 0; $i <= $count_input_data; $i++) {
-                    $fk = $ro['foreign_key'];
                     $column_data = [];
-                    $column_data[$fk] = $id;
                     foreach ($columns as $col) {
                         $colname = $col['name'];
-                        $column_data[$colname] = Request::get($name.'-'.$colname)[$i];
+                        $colvalue = Request::get($name.'-'.$colname)[$i];
+                        if(!empty($colvalue)) $column_data[$colname] = $colvalue;
                     }
+                    if(!empty($column_data)){
+                        $column_data[$fk] = $id;
                     $child_array[] = $column_data;
+                }
                 }
 
                 $childtable = CRUDBooster::parseSqlTable($ro['table'])['table'];
@@ -1215,7 +1296,7 @@ class CBController extends Controller
             }
         }
 
-        $this->hook_after_add($this->arr[$this->primary_key]);
+        $this->hook_after_add($lastInsertId);
 
         $this->return_url = ($this->return_url) ? $this->return_url : Request::get('return_url');
 
@@ -1300,7 +1381,7 @@ class CBController extends Controller
                         foreach ($inputdata as $input_id) {
                             $relationship_table_pk = CB::pk($ro['relationship_table']);
                             DB::table($ro['relationship_table'])->insert([
-                                $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
+//                                 $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
                                 $foreignKey => $id,
                                 $foreignKey2 => $input_id,
                             ]);
@@ -1310,7 +1391,7 @@ class CBController extends Controller
             }
 
             if ($ro['type'] == 'select2') {
-                if ($ro['relationship_table']) {
+                if ($ro['relationship_table'] && $ro["datatable_orig"] == "") {
                     $datatable = explode(",", $ro['datatable'])[0];
 
                     $foreignKey2 = CRUDBooster::getForeignKey($datatable, $ro['relationship_table']);
@@ -1321,19 +1402,25 @@ class CBController extends Controller
                         foreach ($inputdata as $input_id) {
                             $relationship_table_pk = CB::pk($ro['relationship_table']);
                             DB::table($ro['relationship_table'])->insert([
-                                $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
+//                                 $relationship_table_pk => CRUDBooster::newId($ro['relationship_table']),
                                 $foreignKey => $id,
                                 $foreignKey2 => $input_id,
                             ]);
                         }
                     }
                 }
+                if ($ro['relationship_table'] && $ro["datatable_orig"] != "") {
+                    $params = explode("|", $ro['datatable_orig']);
+                    if(!isset($params[2])) $params[2] = "id";
+                    DB::table($params[0])->where($params[2], $id)->update([$params[1] => implode(",",$inputdata)]);
+                }
             }
 
             if ($ro['type'] == 'child') {
                 $name = str_slug($ro['label'], '');
                 $columns = $ro['columns'];
-                $count_input_data = count(Request::get($name.'-'.$columns[0]['name'])) - 1;
+                $getColName = Request::get($name.'-'.$columns[0]['name']);
+                $count_input_data = ($getColName)?(count($getColName) - 1):0;
                 $child_array = [];
                 $childtable = CRUDBooster::parseSqlTable($ro['table'])['table'];
                 $fk = $ro['foreign_key'];
@@ -1343,21 +1430,20 @@ class CBController extends Controller
                 $childtablePK = CB::pk($childtable);
 
                 for ($i = 0; $i <= $count_input_data; $i++) {
-
                     $column_data = [];
-                    $column_data[$childtablePK] = $lastId;
-                    $column_data[$fk] = $id;
                     foreach ($columns as $col) {
                         $colname = $col['name'];
-                        $column_data[$colname] = Request::get($name.'-'.$colname)[$i];
+                        $colvalue = Request::get($name.'-'.$colname)[$i];
+                        if(!empty($colvalue)) $column_data[$colname] = $colvalue;
                     }
+                    if(!empty($column_data)){
+                        $column_data[$childtablePK] = $lastId;
+                        $column_data[$fk] = $id;
                     $child_array[] = $column_data;
-
                     $lastId++;
                 }
-
+                }
                 $child_array = array_reverse($child_array);
-
                 DB::table($childtable)->insert($child_array);
             }
         }
@@ -1450,8 +1536,10 @@ class CBController extends Controller
             $file = storage_path('app/'.$file);
             $rows = Excel::load($file, function ($reader) {
             })->get();
-
-            Session::put('total_data_import', count($rows));
+            
+            $countRows = ($rows)?count($rows):0;
+            
+            Session::put('total_data_import', $countRows);
 
             $data_import_column = [];
             foreach ($rows as $value) {
@@ -1459,7 +1547,7 @@ class CBController extends Controller
                 foreach ($value as $k => $v) {
                     $a[] = $k;
                 }
-                if (count($a)) {
+                if ($a && count($a)) {
                     $data_import_column = $a;
                 }
                 break;
@@ -1741,6 +1829,10 @@ class CBController extends Controller
     {
     }
 
+    /* atlasan edit */
+    public function hook_data_result(&$data_result,&$DB_req_ob) {
+    }
+    
     public function hook_row_index($index, &$value)
     {
     }

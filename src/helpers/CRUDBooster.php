@@ -14,6 +14,16 @@ use Validator;
 
 class CRUDBooster
 {
+    /**
+    	Comma-delimited data output from the child table
+    */
+    public static function echoSelect2Mult($values, $table, $id, $name) {
+        $values = explode(",", $values);
+        return implode(", ", DB::table($table)->whereIn($id, $values)->pluck($name)->toArray());
+        //implode(", ", DB::table("syudo_list_pokemons_types")->whereIn("id", explode(",", $row->type))->pluck("name")->toArray())
+        
+    }
+    
     public static function uploadBase64($value, $id = null)
     {
         if (! self::myId()) {
@@ -32,16 +42,14 @@ class CRUDBooster
         @$mime_type = explode('/', $mime_type);
         @$mime_type = $mime_type[1];
         if ($mime_type) {
-            if (in_array($mime_type, $uploads_format_candidate)) {
-                $filePath = 'uploads/'.$userID.'/'.date('Y-m');
-                Storage::makeDirectory($filePath);
-                $filename = md5(str_random(5)).'.'.$mime_type;
-                if (Storage::put($filePath.'/'.$filename, $filedata)) {
-                    self::resizeImage($filePath.'/'.$filename);
+            $filePath = 'uploads/'.$userID.'/'.date('Y-m');
+		Storage::makeDirectory($filePath);
+		$filename = md5(str_random(5)).'.'.$mime_type;
+		if (Storage::put($filePath.'/'.$filename, $filedata)) {
+		    self::resizeImage($filePath.'/'.$filename);
 
-                    return $filePath.'/'.$filename;
-                }
-            }
+		    return $filePath.'/'.$filename;
+		}
         }
     }
 
@@ -887,31 +895,45 @@ class CRUDBooster
         return self::findPrimaryKey($table);
     }
 
-    public static function findPrimaryKey($table)
-    {
-        if (! $table) {
-            return 'id';
-        }
+//     public static function findPrimaryKey($table)
+//     {
+//         if (! $table) {
+//             return 'id';
+//         }
 
-        if (self::getCache('table_'.$table, 'primary_key')) {
-            return self::getCache('table_'.$table, 'primary_key');
-        }
-        $table = CRUDBooster::parseSqlTable($table);
+//         if (self::getCache('table_'.$table, 'primary_key')) {
+//             return self::getCache('table_'.$table, 'primary_key');
+//         }
+//         $table = CRUDBooster::parseSqlTable($table);
 
-        if (! $table['table']) {
-            throw new \Exception("parseSqlTable can't determine the table");
-        }
-        $query = config('database.connections.'.config('database.default').'.driver') == 'pgsql' ? "select * from information_schema.key_column_usage WHERE TABLE_NAME = '$table[table]'" : "select * from information_schema.COLUMNS where TABLE_SCHEMA = '$table[database]' and TABLE_NAME = '$table[table]' and COLUMN_KEY = 'PRI'";
-        $keys = DB::select($query);
-        $primary_key = $keys[0]->COLUMN_NAME;
-        if ($primary_key) {
-            self::putCache('table_'.$table, 'primary_key', $primary_key);
+//         if (! $table['table']) {
+//             throw new \Exception("parseSqlTable can't determine the table");
+//         }
+//         $query = config('database.connections.'.config('database.default').'.driver') == 'pgsql' ? "select * from information_schema.key_column_usage WHERE TABLE_NAME = '$table[table]'" : "select * from information_schema.COLUMNS where TABLE_SCHEMA = '$table[database]' and TABLE_NAME = '$table[table]' and COLUMN_KEY = 'PRI'";
+//         $keys = DB::select($query);
+//         $primary_key = $keys[0]->COLUMN_NAME;
+//         if ($primary_key) {
+//             self::putCache('table_'.$table, 'primary_key', $primary_key);
 
-            return $primary_key;
-        } else {
-            return 'id';
-        }
-    }
+//             return $primary_key;
+//         } else {
+//             return 'id';
+//         }
+//     }
+
+	public static function findPrimaryKey($table)
+	{
+		if(!$table)
+		{
+			return 'id';
+		}
+		
+		$pk = DB::getDoctrineSchemaManager()->listTableDetails($table)->getPrimaryKey();
+		if(!$pk) {
+		    return null;
+		}
+		return $pk->getColumns()[0];	
+	}
 
     public static function newId($table)
     {
@@ -1023,15 +1045,17 @@ class CRUDBooster
 
     public static function insertLog($description, $details = '')
     {
-        $a = [];
-        $a['created_at'] = date('Y-m-d H:i:s');
-        $a['ipaddress'] = $_SERVER['REMOTE_ADDR'];
-        $a['useragent'] = $_SERVER['HTTP_USER_AGENT'];
-        $a['url'] = Request::url();
-        $a['description'] = $description;
-        $a['details'] = $details;
-        $a['id_cms_users'] = self::myId();
-        DB::table('cms_logs')->insert($a);
+        if (CRUDBooster::getSetting('api_debug_mode')) {
+            $a = [];
+            $a['created_at'] = date('Y-m-d H:i:s');
+            $a['ipaddress'] = $_SERVER['REMOTE_ADDR'];
+            $a['useragent'] = $_SERVER['HTTP_USER_AGENT'];
+            $a['url'] = Request::url();
+            $a['description'] = $description;
+            $a['details'] = $details;
+            $a['id_cms_users'] = self::myId();
+            DB::table('cms_logs')->insert($a);
+        }
     }
 
     public static function referer()
@@ -1788,6 +1812,18 @@ class CRUDBooster
 	        //Your code here
 	            
 	    }
+        
+        /* @atlasan edit */
+        /*
+	    | ---------------------------------------------------------------------- 
+	    | Hook for manipulate row of index table html 
+	    | ---------------------------------------------------------------------- 
+	    |
+	    */    
+	    public function hook_data_result(&$data_result,&$DB_req_ob) {	        
+	    	//Your code here
+	    }
+
 
 	    /*
 	    | ---------------------------------------------------------------------- 
